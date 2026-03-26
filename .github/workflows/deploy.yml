@@ -1,4 +1,4 @@
-name: Deploy GitHub CICD Roles
+name: Deploy CloudTrail trail
 
 # Environment variables for TFE
 #env:
