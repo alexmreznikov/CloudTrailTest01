@@ -150,6 +150,25 @@ resource "aws_iam_role_policy" "cicd_cloudtrail" {
         Resource = "*"
       },
       {
+        Sid    = "TerraformStateS3Bucket"
+        Effect = "Allow"
+        Action = [
+          "s3:ListBucket",
+          "s3:GetBucketVersioning"
+        ]
+        Resource = var.terraform_state_bucket_arn
+      },
+      {
+        Sid    = "TerraformStateS3Objects"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject"
+        ]
+        Resource = "${var.terraform_state_bucket_arn}/*"
+      },
+      {
         Sid    = "S3PermissionsForCloudTrail"
         Effect = "Allow"
         Action = [

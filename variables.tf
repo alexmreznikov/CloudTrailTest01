@@ -38,6 +38,11 @@ variable "cicd_role_name" {
   default     = "org-mgmt-GithubCICDRole"
 }
 
+variable "terraform_state_bucket_arn" {
+  description = "ARN of the S3 bucket used for Terraform state storage"
+  type        = string
+}
+
 variable "enable_github_cicd_roles" {
   description = "Enable GitHub CICD roles module"
   type        = bool

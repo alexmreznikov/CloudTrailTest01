@@ -51,6 +51,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "ct_bucket_lifecycle" {
     id     = "delete-old-logs"
     status = "Enabled"
 
+    filter {}
+
     expiration {
       days = var.log_retention_days
     }

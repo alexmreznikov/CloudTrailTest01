@@ -28,3 +28,8 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "terraform_state_bucket_arn" {
+  description = "ARN of the S3 bucket used for Terraform state storage"
+  type        = string
+}

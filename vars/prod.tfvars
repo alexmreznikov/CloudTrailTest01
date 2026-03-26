@@ -4,9 +4,17 @@ serviceid = "CI000111111"
 region    = "ap-southeast-2"
 env_key   = "prod"
 
+
+
 # IAM Role Names
 oidc_role_name = "org-mgmt-GithubOIDCRole"
 cicd_role_name = "org-mgmt-GithubCICDRole"
+
+# Terraform State Bucket
+terraform_state_bucket_arn = "arn:aws:s3:::org-mgmt-terraform-state-alexorg-local"
+
+github_repo = "CloudTrailTest01"
+github_org = "alexmreznikov"
 
 # Module Controls
 enable_github_cicd_roles  = true
