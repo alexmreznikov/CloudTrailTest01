@@ -1,13 +1,15 @@
 name: Deploy GitHub CICD Roles
 
 # Environment variables for TFE
-env:
-  TF_VERSION: 1.9.8
+#env:
+#  TF_VERSION: 1.9.8
 
-# Permissions required for the workflow
 permissions:
-  id-token: write # Required for OIDC authentication
-  contents: read  # Required for actions/checkout
+  actions: read
+  statuses: read
+  id-token: write
+  contents: read
+  security-events: write
 
 # Workflow triggers
 on:
@@ -30,30 +32,30 @@ on:
           - destroy
 
 jobs:
-  set-environment:
-    runs-on: default
-    outputs:
-      environment: ${{ steps.determine-env.outputs.ENVIRONMENT }}
-      tag_name: ${{ steps.determine-env.outputs.TAG_NAME }}
-    env:
-      TAG_NAME: ${{ github.event.inputs.environment || github.ref_name }}
-    steps:
-      - name: Determine environment
-        id: determine-env
-        run: |
-          echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_OUTPUT
-          echo "ENVIRONMENT=${ENVIRONMENT}"
+#  set-environment:
+#    runs-on: default
+#    outputs:
+#      environment: ${{ steps.determine-env.outputs.ENVIRONMENT }}
+#      tag_name: ${{ steps.determine-env.outputs.TAG_NAME }}
+#    env:
+#      TAG_NAME: ${{ github.event.inputs.environment || github.ref_name }}
+#    steps:
+#      - name: Determine environment
+#        id: determine-env
+#        run: |
+#          echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_OUTPUT
+#          echo "ENVIRONMENT=${ENVIRONMENT}"
 
   deploy:
-    needs: set-environment
+#    needs: set-environment
     runs-on:
       group: default
-    environment: ${{ needs.set-environment.outputs.environment }}
+#    environment: ${{ needs.set-environment.outputs.environment }}
 
     steps:
-      - name: Check github environment
-        run: |
-          echo "GITHUB_ENVIRONMENT=${{ needs.set-environment.outputs.environment }}"
+#      - name: Check github environment
+#        run: |
+#          echo "GITHUB_ENVIRONMENT=${{ needs.set-environment.outputs.environment }}"
 
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -65,7 +67,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: ${{ env.TF_VERSION }}
+#          terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
 
       # Configure Git credentials for private module access
