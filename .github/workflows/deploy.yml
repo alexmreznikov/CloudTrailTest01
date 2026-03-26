@@ -1,0 +1,125 @@
+name: Deploy GitHub CICD Roles
+
+# Environment variables for TFE
+env:
+  TF_VERSION: 1.9.8
+
+# Permissions required for the workflow
+permissions:
+  id-token: write # Required for OIDC authentication
+  contents: read  # Required for actions/checkout
+
+# Workflow triggers
+on:
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        required: true
+        description: Select the environment
+        options:
+          - prod-org
+      action:
+        description: "Terraform action to perform - apply or destroy"
+        required: true
+        type: string
+        default: apply
+        options:
+          - apply
+          - destroy
+
+jobs:
+  set-environment:
+    runs-on: default
+    outputs:
+      environment: ${{ steps.determine-env.outputs.ENVIRONMENT }}
+      tag_name: ${{ steps.determine-env.outputs.TAG_NAME }}
+    env:
+      TAG_NAME: ${{ github.event.inputs.environment || github.ref_name }}
+    steps:
+      - name: Determine environment
+        id: determine-env
+        run: |
+          echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_OUTPUT
+          echo "ENVIRONMENT=${ENVIRONMENT}"
+
+  deploy:
+    needs: set-environment
+    runs-on:
+      group: default
+    environment: ${{ needs.set-environment.outputs.environment }}
+
+    steps:
+      - name: Check github environment
+        run: |
+          echo "GITHUB_ENVIRONMENT=${{ needs.set-environment.outputs.environment }}"
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      # Setup Terraform CLI
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      # Configure Git credentials for private module access
+      - name: Configure Git credentials for Terraform
+        run: |
+          git config --global url."https://oauth2:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
+      # Initialize Terraform
+      - name: Initialize Terraform
+        run: |
+          cd ${{ github.workspace }}
+          terraform init
+
+      - name: Path Check
+        run: ls -la ${{ github.workspace }}/vars/
+
+      # Generate Terraform plan
+      - name: Terraform Plan
+        if: github.event.inputs.action == 'apply' || github.event.inputs.action == 'plan' || github.event.inputs.action == ''
+        id: plan
+        run: |
+          set +e
+          cd ${{ github.workspace }}
+          terraform plan -detailed-exitcode -var-file="${{ github.workspace }}/${{ vars.TF_VARS_FILE_PATH }}" -out=tf.plan
+          exitcode=$?
+          echo "Terraform plan exit code: ${exitcode}"
+          echo "exitcode=${exitcode}" >> $GITHUB_ENV
+        continue-on-error: true
+
+      - name: Terraform Plan - destroy
+        if: github.event.inputs.action == 'destroy'
+        run: |
+          set +e
+          cd ${{ github.workspace }}
+          terraform plan -detailed-exitcode -input=false -destroy -var-file="${{ github.workspace }}/${{ vars.TF_VARS_FILE_PATH }}" -out=tf.plan
+          exitcode=$?
+          echo "Terraform plan exit code: ${exitcode}"
+          echo "exitcode=${exitcode}" >> $GITHUB_ENV
+
+      - name: Terraform Apply - No changes
+        if: env.exitcode == '0'
+        run: |
+          echo "Plan exit code output: ${{ env.exitcode }}"
+          echo "No changes detected, skipping apply."
+
+      - name: Terraform Apply - With Changes
+        if: env.exitcode == '2' && github.event.inputs.action != 'plan'
+        run: |
+          cd ${{ github.workspace }}
+          echo "Plan exit code output: ${{ env.exitcode }}"
+          terraform apply tf.plan
+
+      - name: Terraform Output
+        if: env.exitcode == '2' && github.event.inputs.action != 'destroy'
+        run: |
+          cd ${{ github.workspace }}
+          terraform output
