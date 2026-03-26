@@ -73,6 +73,23 @@ jobs:
         run: |
           git config --global url."https://oauth2:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
+      # Configure AWS credentials using OIDC
+      - name: Configure AWS Credentials (OIDC Role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.OIDC_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: GitHubActions-OIDC-Session
+
+      # Assume CICD role using the OIDC role credentials
+      - name: Configure AWS Credentials (CICD Role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.CICD_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: GitHubActions-CICD-Session
+          role-chaining: true
+
       # Initialize Terraform
       - name: Initialize Terraform
         run: |

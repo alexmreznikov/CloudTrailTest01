@@ -17,7 +17,7 @@ variable "env_key" {
 variable "github_org" {
   description = "GitHub organization name for OIDC authentication"
   type        = string
-  default     = "CBA-General"
+  default     = "alexmreznikov"
 }
 
 variable "github_repo" {
