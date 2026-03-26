@@ -9,7 +9,7 @@ oidc_role_name = "org-mgmt-GithubOIDCRole"
 cicd_role_name = "org-mgmt-GithubCICDRole"
 
 # Module Controls
-enable_github_cicd_roles  = false
+enable_github_cicd_roles  = true
 enable_cloudtrail_bucket  = true
 enable_cloudtrail_trail   = true
 
