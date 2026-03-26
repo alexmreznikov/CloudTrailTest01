@@ -38,7 +38,7 @@ variable "cicd_role_name" {
   default     = "org-mgmt-GithubCICDRole"
 }
 
-variable "enable_github_cicd" {
+variable "enable_github_cicd_roles" {
   description = "Enable GitHub CICD roles module"
   type        = bool
   default     = false

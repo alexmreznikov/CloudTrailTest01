@@ -1,27 +1,27 @@
 # GitHub CICD Roles outputs
 output "github_oidc_provider_arn" {
   description = "ARN of the GitHub OIDC provider"
-  value       = var.enable_github_cicd ? module.github_cicd_cloudtrail[0].oidc_provider_arn : null
+  value       = var.enable_github_cicd_roles ? module.github_cicd_cloudtrail[0].oidc_provider_arn : null
 }
 
 output "github_oidc_role_arn" {
   description = "ARN of the GitHub OIDC role for CloudTrail management"
-  value       = var.enable_github_cicd ? module.github_cicd_cloudtrail[0].oidc_role_arn : null
+  value       = var.enable_github_cicd_roles ? module.github_cicd_cloudtrail[0].oidc_role_arn : null
 }
 
 output "github_oidc_role_name" {
   description = "Name of the GitHub OIDC role for CloudTrail management"
-  value       = var.enable_github_cicd ? module.github_cicd_cloudtrail[0].oidc_role_name : null
+  value       = var.enable_github_cicd_roles ? module.github_cicd_cloudtrail[0].oidc_role_name : null
 }
 
 output "github_cicd_role_arn" {
   description = "ARN of the GitHub CICD role for CloudTrail management"
-  value       = var.enable_github_cicd ? module.github_cicd_cloudtrail[0].cicd_role_arn : null
+  value       = var.enable_github_cicd_roles ? module.github_cicd_cloudtrail[0].cicd_role_arn : null
 }
 
 output "github_cicd_role_name" {
   description = "Name of the GitHub CICD role for CloudTrail management"
-  value       = var.enable_github_cicd ? module.github_cicd_cloudtrail[0].cicd_role_name : null
+  value       = var.enable_github_cicd_roles ? module.github_cicd_cloudtrail[0].cicd_role_name : null
 }
 
 # CloudTrail outputs
