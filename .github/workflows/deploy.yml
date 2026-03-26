@@ -48,8 +48,7 @@ jobs:
 
   deploy:
 #    needs: set-environment
-    runs-on:
-      group: default
+    runs-on: ubuntu-latest
 #    environment: ${{ needs.set-environment.outputs.environment }}
 
     steps:
