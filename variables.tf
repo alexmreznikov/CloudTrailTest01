@@ -14,12 +14,6 @@ variable "env_key" {
   type        = string
 }
 
-variable "enable_cloudtrail_bucket" {
-  description = "Enable CloudTrail S3 bucket module"
-  type        = bool
-  default     = false
-}
-
 variable "enable_cloudtrail_trail" {
   description = "Enable CloudTrail trail module"
   type        = bool
@@ -32,14 +26,7 @@ variable "cloudtrail_name" {
   default     = "org-mgmt-cloudtrail"
 }
 
-variable "cloudtrail_bucket_name" {
-  description = "Name of the S3 bucket for CloudTrail logs"
+variable "s3_bucket_name" {
+  description = "Name of the S3 bucket where CloudTrail logs will be stored"
   type        = string
-  default     = "org-mgmt-cloudtrail-logs"
-}
-
-variable "cloudtrail_log_retention_days" {
-  description = "Number of days to retain CloudTrail logs (0 = no expiration)"
-  type        = number
-  default     = 90
 }

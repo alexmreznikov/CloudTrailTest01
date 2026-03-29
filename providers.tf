@@ -6,6 +6,7 @@ provider "aws" {
       "cmdb-technical-service-offering-id" = var.serviceid
       "ManagedBy"                          = "Terraform"
       "Environment"                        = var.env_key
+
     }
   }
 }
