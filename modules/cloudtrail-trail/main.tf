@@ -1,7 +1,10 @@
+data "aws_caller_identity" "current" {}
+
 # CloudTrail trail (multi-region)
 resource "aws_cloudtrail" "main" {
   name                          = var.trail_name
   s3_bucket_name                = var.s3_bucket_name
+  s3_key_prefix                 = "cloudtrail/${data.aws_caller_identity.current.account_id}"
   include_global_service_events = true
   is_multi_region_trail         = true
   enable_logging                = true
