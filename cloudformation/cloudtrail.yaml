@@ -1,0 +1,94 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  CloudTrail Trail Infrastructure.
+  Creates a multi-region CloudTrail trail that logs to an existing S3 bucket
+  in the AWS Organization Management Account.
+
+# -------------------------------------------------------
+# Parameters
+# -------------------------------------------------------
+Parameters:
+  TrailName:
+    Type: String
+    Default: org-mgmt-cloudtrail
+    Description: Name of the CloudTrail trail
+
+  S3BucketName:
+    Type: String
+    Description: Name of the S3 bucket where CloudTrail logs will be stored
+
+  ServiceId:
+    Type: String
+    Description: Service ID for CMDB tracking (cmdb-technical-service-offering-id)
+
+  EnvKey:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - prod
+      - canary
+      - dev
+    Description: Environment key for tagging
+
+  EnableCloudTrailTrail:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Whether to create the CloudTrail trail
+
+# -------------------------------------------------------
+# Conditions
+# -------------------------------------------------------
+Conditions:
+  CreateTrail: !Equals
+    - !Ref EnableCloudTrailTrail
+    - "true"
+
+# -------------------------------------------------------
+# Resources
+# -------------------------------------------------------
+Resources:
+  CloudTrailTrail:
+    Type: AWS::CloudTrail::Trail
+    Condition: CreateTrail
+    Properties:
+      TrailName: !Ref TrailName
+      S3BucketName: !Ref S3BucketName
+      S3KeyPrefix: !Sub "cloudtrail/${AWS::AccountId}"
+      IsMultiRegionTrail: true
+      IncludeGlobalServiceEvents: true
+      IsLogging: true
+      EnableLogFileValidation: true
+      EventSelectors:
+        - ReadWriteType: All
+          IncludeManagementEvents: true
+      Tags:
+        - Key: Name
+          Value: !Ref TrailName
+        - Key: is-guardrail
+          Value: "true"
+        - Key: cmdb-technical-service-offering-id
+          Value: !Ref ServiceId
+        - Key: Environment
+          Value: !Ref EnvKey
+        - Key: Purpose
+          Value: Multi-region CloudTrail audit logging
+        - Key: ManagedBy
+          Value: CloudFormation
+
+# -------------------------------------------------------
+# Outputs
+# -------------------------------------------------------
+Outputs:
+  TrailARN:
+    Description: ARN of the CloudTrail trail
+    Condition: CreateTrail
+    Value: !GetAtt CloudTrailTrail.Arn
+
+  TrailName:
+    Description: Name of the CloudTrail trail
+    Condition: CreateTrail
+    Value: !Ref CloudTrailTrail
+

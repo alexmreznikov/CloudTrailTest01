@@ -1,9 +1,5 @@
 name: Deploy CloudTrail trail
 
-# Environment variables for TFE
-#env:
-#  TF_VERSION: 1.9.8
-
 permissions:
   actions: read
   statuses: read
@@ -23,56 +19,29 @@ on:
         options:
           - prod-org
       action:
-        description: "Terraform action to perform - apply or destroy"
+        description: "Action to perform - apply or destroy"
         required: true
-        type: string
+        type: choice
         default: apply
         options:
           - apply
           - destroy
 
-jobs:
-#  set-environment:
-#    runs-on: default
-#    outputs:
-#      environment: ${{ steps.determine-env.outputs.ENVIRONMENT }}
-#      tag_name: ${{ steps.determine-env.outputs.TAG_NAME }}
-#    env:
-#      TAG_NAME: ${{ github.event.inputs.environment || github.ref_name }}
-#    steps:
-#      - name: Determine environment
-#        id: determine-env
-#        run: |
-#          echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_OUTPUT
-#          echo "ENVIRONMENT=${ENVIRONMENT}"
+env:
+  STACK_NAME: org-mgmt-cloudtrail-stack
+  TEMPLATE_FILE: cloudformation/cloudtrail.yaml
+  PARAMS_FILE: vars/prod.json
 
+jobs:
   deploy:
-#    needs: set-environment
     runs-on: ubuntu-latest
-#    environment: ${{ needs.set-environment.outputs.environment }}
 
     steps:
-#      - name: Check github environment
-#        run: |
-#          echo "GITHUB_ENVIRONMENT=${{ needs.set-environment.outputs.environment }}"
-
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
-
-      # Setup Terraform CLI
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-#          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
-
-      # Configure Git credentials for private module access
-      - name: Configure Git credentials for Terraform
-        run: |
-          git config --global url."https://oauth2:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
       # Configure AWS credentials using OIDC
       - name: Configure AWS Credentials (OIDC Role)
@@ -91,53 +60,135 @@ jobs:
           role-session-name: GitHubActions-CICD-Session
           role-chaining: true
 
-      # Initialize Terraform
-      - name: Initialize Terraform
+      # -------------------------------------------------------
+      # Validate the CloudFormation template
+      # -------------------------------------------------------
+      - name: Validate CloudFormation template
         run: |
-          cd ${{ github.workspace }}
-          terraform init
+          aws cloudformation validate-template \
+            --template-body file://${{ github.workspace }}/${{ env.TEMPLATE_FILE }}
 
-      - name: Path Check
-        run: ls -la ${{ github.workspace }}/vars/
-
-      # Generate Terraform plan
-      - name: Terraform Plan
-        if: github.event.inputs.action == 'apply' || github.event.inputs.action == 'plan' || github.event.inputs.action == ''
-        id: plan
+      # -------------------------------------------------------
+      # Deploy (apply) path
+      # -------------------------------------------------------
+      - name: Deploy CloudFormation stack
+        if: github.event.inputs.action == 'apply'
         run: |
-          set +e
-          cd ${{ github.workspace }}
-          terraform plan -detailed-exitcode -var-file="${{ github.workspace }}/${{ vars.TF_VARS_FILE_PATH }}" -out=tf.plan
-          exitcode=$?
-          echo "Terraform plan exit code: ${exitcode}"
-          echo "exitcode=${exitcode}" >> $GITHUB_ENV
-        continue-on-error: true
+          aws cloudformation deploy \
+            --template-file ${{ github.workspace }}/${{ env.TEMPLATE_FILE }} \
+            --stack-name ${{ env.STACK_NAME }} \
+            --parameter-overrides file://${{ github.workspace }}/${{ env.PARAMS_FILE }} \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
+            --region ${{ vars.AWS_REGION }} \
+            --tags \
+              "cmdb-technical-service-offering-id=CI000111111" \
+              "ManagedBy=CloudFormation" \
+              "Environment=prod"
+          echo "Stack deployed successfully."
 
-      - name: Terraform Plan - destroy
+      - name: Show stack outputs
+        if: github.event.inputs.action == 'apply'
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --query 'Stacks[0].Outputs' \
+            --output table \
+            --region ${{ vars.AWS_REGION }}
+
+      # -------------------------------------------------------
+      # Verify trail was created correctly
+      # -------------------------------------------------------
+      - name: Verify CloudTrail trail exists
+        if: github.event.inputs.action == 'apply'
+        run: |
+          echo "--- Describing trail ---"
+          TRAIL_JSON=$(aws cloudtrail describe-trails \
+            --trail-name-list org-mgmt-cloudtrail \
+            --region ${{ vars.AWS_REGION }})
+          echo "$TRAIL_JSON" | jq .
+
+          TRAIL_COUNT=$(echo "$TRAIL_JSON" | jq '.trailList | length')
+          if [ "$TRAIL_COUNT" -eq 0 ]; then
+            echo "::error::Trail 'org-mgmt-cloudtrail' was NOT found."
+            exit 1
+          fi
+          echo "✓ Trail exists."
+
+      - name: Verify CloudTrail is logging
+        if: github.event.inputs.action == 'apply'
+        run: |
+          echo "--- Checking trail status ---"
+          STATUS_JSON=$(aws cloudtrail get-trail-status \
+            --name org-mgmt-cloudtrail \
+            --region ${{ vars.AWS_REGION }})
+          echo "$STATUS_JSON" | jq .
+
+          IS_LOGGING=$(echo "$STATUS_JSON" | jq -r '.IsLogging')
+          if [ "$IS_LOGGING" != "true" ]; then
+            echo "::error::Trail 'org-mgmt-cloudtrail' is NOT logging (IsLogging=$IS_LOGGING)."
+            exit 1
+          fi
+          echo "✓ Trail is actively logging."
+
+      - name: Verify trail configuration
+        if: github.event.inputs.action == 'apply'
+        run: |
+          echo "--- Verifying trail configuration ---"
+          TRAIL_JSON=$(aws cloudtrail describe-trails \
+            --trail-name-list org-mgmt-cloudtrail \
+            --region ${{ vars.AWS_REGION }})
+
+          IS_MULTI_REGION=$(echo "$TRAIL_JSON" | jq -r '.trailList[0].IsMultiRegionTrail')
+          INCLUDE_GLOBAL=$(echo "$TRAIL_JSON" | jq -r '.trailList[0].IncludeGlobalServiceEvents')
+          S3_BUCKET=$(echo "$TRAIL_JSON" | jq -r '.trailList[0].S3BucketName')
+          S3_PREFIX=$(echo "$TRAIL_JSON" | jq -r '.trailList[0].S3KeyPrefix')
+          LOG_VALIDATION=$(echo "$TRAIL_JSON" | jq -r '.trailList[0].LogFileValidationEnabled')
+
+          echo "  IsMultiRegionTrail:        $IS_MULTI_REGION"
+          echo "  IncludeGlobalServiceEvents: $INCLUDE_GLOBAL"
+          echo "  S3BucketName:              $S3_BUCKET"
+          echo "  S3KeyPrefix:               $S3_PREFIX"
+          echo "  LogFileValidationEnabled:  $LOG_VALIDATION"
+
+          ERRORS=0
+          if [ "$IS_MULTI_REGION" != "true" ]; then
+            echo "::error::IsMultiRegionTrail is not true"
+            ERRORS=$((ERRORS+1))
+          fi
+          if [ "$INCLUDE_GLOBAL" != "true" ]; then
+            echo "::error::IncludeGlobalServiceEvents is not true"
+            ERRORS=$((ERRORS+1))
+          fi
+          if [ "$S3_BUCKET" != "org-mgmt-cloudtrail-logs-alexorg-remote" ]; then
+            echo "::error::S3BucketName mismatch: $S3_BUCKET"
+            ERRORS=$((ERRORS+1))
+          fi
+          if [ "$LOG_VALIDATION" != "true" ]; then
+            echo "::error::LogFileValidationEnabled is not true"
+            ERRORS=$((ERRORS+1))
+          fi
+
+          if [ "$ERRORS" -gt 0 ]; then
+            echo "::error::Trail configuration verification failed with $ERRORS error(s)."
+            exit 1
+          fi
+          echo "✓ Trail configuration verified successfully."
+
+      # -------------------------------------------------------
+      # Destroy path
+      # -------------------------------------------------------
+      - name: Delete CloudFormation stack
         if: github.event.inputs.action == 'destroy'
         run: |
-          set +e
-          cd ${{ github.workspace }}
-          terraform plan -detailed-exitcode -input=false -destroy -var-file="${{ github.workspace }}/${{ vars.TF_VARS_FILE_PATH }}" -out=tf.plan
-          exitcode=$?
-          echo "Terraform plan exit code: ${exitcode}"
-          echo "exitcode=${exitcode}" >> $GITHUB_ENV
+          echo "Deleting stack ${{ env.STACK_NAME }}..."
+          aws cloudformation delete-stack \
+            --stack-name ${{ env.STACK_NAME }} \
+            --region ${{ vars.AWS_REGION }}
 
-      - name: Terraform Apply - No changes
-        if: env.exitcode == '0'
-        run: |
-          echo "Plan exit code output: ${{ env.exitcode }}"
-          echo "No changes detected, skipping apply."
+          echo "Waiting for stack deletion to complete..."
+          aws cloudformation wait stack-delete-complete \
+            --stack-name ${{ env.STACK_NAME }} \
+            --region ${{ vars.AWS_REGION }}
 
-      - name: Terraform Apply - With Changes
-        if: env.exitcode == '2' && github.event.inputs.action != 'plan'
-        run: |
-          cd ${{ github.workspace }}
-          echo "Plan exit code output: ${{ env.exitcode }}"
-          terraform apply tf.plan
-
-      - name: Terraform Output
-        if: env.exitcode == '2' && github.event.inputs.action != 'destroy'
-        run: |
-          cd ${{ github.workspace }}
-          terraform output
+          echo "✓ Stack deleted successfully."

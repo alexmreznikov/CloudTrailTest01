@@ -1,47 +1,45 @@
 # AGENTS Guide
 
 ## Project intent
-- This repo provisions one AWS CloudTrail trail in the Org Management account using Terraform.
-- Root config is a thin wrapper; resource logic lives in `modules/cloudtrail-trail/`.
+- This repo provisions one AWS CloudTrail trail in the Org Management account using AWS CloudFormation.
+- The CloudFormation template lives in `cloudformation/cloudtrail.yaml`.
 - Deployment ordering matters: this repo expects IAM/OIDC roles and log bucket to already exist (see `README.md`).
 
 ## Architecture and boundaries
-- Entry point: `main.tf` creates `module.cloudtrail_trail` only when `var.enable_cloudtrail_trail` is true (`count` toggle pattern).
-- Module resource: `modules/cloudtrail-trail/main.tf` defines `aws_cloudtrail.main` with:
-  - multi-region enabled (`is_multi_region_trail = true`)
-  - global events enabled (`include_global_service_events = true`)
-  - account-scoped prefix (`s3_key_prefix = "cloudtrail/${data.aws_caller_identity.current.account_id}"`)
-- Inputs are passed directly from root vars (`variables.tf` + `vars/prod.tfvars`); there is no `terraform_remote_state` data source in code.
-- Outputs are null-safe at root (`outputs.tf`) because module uses `count`.
+- Entry point: `cloudformation/cloudtrail.yaml` defines the `CloudTrailTrail` resource (`AWS::CloudTrail::Trail`).
+- The `EnableCloudTrailTrail` parameter + `CreateTrail` condition controls whether the trail is created (mirrors the old Terraform `count` toggle).
+- Trail configuration:
+  - multi-region enabled (`IsMultiRegionTrail: true`)
+  - global events enabled (`IncludeGlobalServiceEvents: true`)
+  - account-scoped prefix (`S3KeyPrefix: cloudtrail/${AWS::AccountId}`)
+  - log file validation enabled (`EnableLogFileValidation: true`)
+  - event selectors: All read/write, management events included
+- Inputs are passed via parameter overrides file (`vars/prod.json`).
+- Outputs are conditional on `CreateTrail`.
 
 ## Key files to modify by task
-- Change CloudTrail behavior: `modules/cloudtrail-trail/main.tf`.
-- Change environment defaults/toggles: `variables.tf`, `vars/prod.tfvars`.
-- Change required versions/providers: `versions.tf`.
-- Change state location: `backend.tf` and (if bootstrapping) `scripts/create-terraform-state-bucket.sh`.
+- Change CloudTrail behavior: `cloudformation/cloudtrail.yaml`.
+- Change environment defaults/parameters: `vars/prod.json`.
 - Change CI deploy behavior: `.github/workflows/deploy.yml`.
 
 ## Developer workflow (local)
-- Standard path is from `README.md`:
-  - `terraform init`
-  - `terraform plan -var-file="vars/prod.tfvars"`
-  - `terraform apply -var-file="vars/prod.tfvars"`
-- Safe preflight checks before plan/apply:
-  - `terraform fmt -recursive`
-  - `terraform validate`
-- If backend bucket is missing, bootstrap via `scripts/create-terraform-state-bucket.sh` (uses `TF_STATE_BUCKET` and `AWS_REGION` env overrides).
+- Standard path from `README.md`:
+  - `aws cloudformation validate-template --template-body file://cloudformation/cloudtrail.yaml`
+  - `aws cloudformation deploy --template-file cloudformation/cloudtrail.yaml --stack-name org-mgmt-cloudtrail-stack --parameter-overrides file://vars/prod.json --capabilities CAPABILITY_NAMED_IAM --no-fail-on-empty-changeset --region ap-southeast-2`
+- To destroy:
+  - `aws cloudformation delete-stack --stack-name org-mgmt-cloudtrail-stack --region ap-southeast-2`
+  - `aws cloudformation wait stack-delete-complete --stack-name org-mgmt-cloudtrail-stack --region ap-southeast-2`
 
 ## CI/CD behavior to preserve
 - `.github/workflows/deploy.yml` is manual (`workflow_dispatch`) with `action` input (`apply` or `destroy`).
 - AWS auth is two-step role assumption: OIDC role first, then CICD role with `role-chaining: true`.
-- Plan uses `terraform plan -detailed-exitcode`; downstream logic depends on exit codes:
-  - `0` => "no changes" path
-  - `2` => apply/output path
-- Vars file path is injected via `${{ vars.TF_VARS_FILE_PATH }}`; keep this contract when editing workflow commands.
+- On `apply`: deploys the CloudFormation stack, shows outputs, then verifies trail existence, logging status, and configuration.
+- On `destroy`: deletes the stack and waits for completion.
+- Stack-level tags are applied via `--tags` in the deploy command.
 
 ## Repo-specific conventions and pitfalls
-- Provider-level `default_tags` in `providers.tf` are expected on all resources; module also merges extra tags.
-- `serviceid` is mandatory in both root and module for CMDB tagging (`cmdb-technical-service-offering-id`).
-- Keep root outputs guarded with `var.enable_cloudtrail_trail ? ... : null` to avoid index errors on `module.cloudtrail_trail[0]`.
-- `backend.tf` is hard-coded to `org-mgmt-terraform-state-alexorg-local` and key `cloudtrail/terraform.tfstate`; changing this affects state migration.
-
+- Tags are applied at both the stack level (in `deploy.yml`) and the resource level (in the template).
+- `ServiceId` is mandatory for CMDB tagging (`cmdb-technical-service-offering-id`).
+- Stack name is `org-mgmt-cloudtrail-stack`; changing this affects the deployed stack.
+- The `EnableCloudTrailTrail` condition means outputs are only present when the trail is created.
+- CloudFormation manages its own state — there is no external state bucket to maintain.

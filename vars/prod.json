@@ -1,0 +1,23 @@
+[
+  {
+    "ParameterKey": "TrailName",
+    "ParameterValue": "org-mgmt-cloudtrail"
+  },
+  {
+    "ParameterKey": "S3BucketName",
+    "ParameterValue": "org-mgmt-cloudtrail-logs-alexorg-remote"
+  },
+  {
+    "ParameterKey": "ServiceId",
+    "ParameterValue": "CI000111111"
+  },
+  {
+    "ParameterKey": "EnvKey",
+    "ParameterValue": "prod"
+  },
+  {
+    "ParameterKey": "EnableCloudTrailTrail",
+    "ParameterValue": "true"
+  }
+]
+
