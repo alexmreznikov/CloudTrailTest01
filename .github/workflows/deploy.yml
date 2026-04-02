@@ -50,7 +50,7 @@ jobs:
 
       - name: Determine deployment environment
         run: |
-          set -euo pipefail
+          set -euxo pipefail
 
           SELECTED_ENV="${{ github.event.inputs.environment }}"
           SELECTED_PARAMS_FILE="vars/${SELECTED_ENV}.json"
@@ -96,7 +96,7 @@ jobs:
       - name: Preflight checks (apply/dry-run)
         if: github.event.inputs.action == 'apply' || github.event.inputs.action == 'dry-run'
         run: |
-          set -euo pipefail
+          set -euxo pipefail
 
           echo "--- Caller identity ---"
           aws sts get-caller-identity
@@ -129,6 +129,7 @@ jobs:
         env:
           CHANGE_SET_NAME: dry-run-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
+          set -euxo pipefail
           echo "Creating non-executed change set: ${CHANGE_SET_NAME}"
 
           if aws cloudformation describe-stacks \
@@ -194,6 +195,7 @@ jobs:
         env:
           CHANGE_SET_NAME: dry-run-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
+          set -euxo pipefail
           aws cloudformation delete-change-set \
             --stack-name ${{ env.STACK_NAME }} \
             --change-set-name "${CHANGE_SET_NAME}" \
@@ -205,6 +207,7 @@ jobs:
       - name: Deploy CloudFormation stack
         if: github.event.inputs.action == 'apply'
         run: |
+          set -euxo pipefail
           aws cloudformation deploy \
             --template-file ${{ github.workspace }}/${{ env.TEMPLATE_FILE }} \
             --stack-name ${{ env.STACK_NAME }} \
@@ -221,6 +224,7 @@ jobs:
       - name: Dump CloudFormation stack events on failure
         if: github.event.inputs.action == 'apply' && failure()
         run: |
+          set -euxo pipefail
           echo "--- Latest CloudFormation stack events ---"
           aws cloudformation describe-stack-events \
             --stack-name ${{ env.STACK_NAME }} \
@@ -231,6 +235,7 @@ jobs:
       - name: Show stack outputs
         if: github.event.inputs.action == 'apply'
         run: |
+          set -euxo pipefail
           aws cloudformation describe-stacks \
             --stack-name ${{ env.STACK_NAME }} \
             --query 'Stacks[0].Outputs' \
@@ -243,6 +248,7 @@ jobs:
       - name: Verify CloudTrail trail exists
         if: github.event.inputs.action == 'apply'
         run: |
+          set -euxo pipefail
           echo "--- Describing trail ---"
           TRAIL_JSON=$(aws cloudtrail describe-trails \
             --trail-name-list org-mgmt-cloudtrail \
@@ -259,6 +265,7 @@ jobs:
       - name: Verify CloudTrail is logging
         if: github.event.inputs.action == 'apply'
         run: |
+          set -euxo pipefail
           echo "--- Checking trail status ---"
           STATUS_JSON=$(aws cloudtrail get-trail-status \
             --name org-mgmt-cloudtrail \
@@ -275,6 +282,7 @@ jobs:
       - name: Verify trail configuration
         if: github.event.inputs.action == 'apply'
         run: |
+          set -euxo pipefail
           echo "--- Verifying trail configuration ---"
           TRAIL_JSON=$(aws cloudtrail describe-trails \
             --trail-name-list org-mgmt-cloudtrail \
@@ -322,6 +330,7 @@ jobs:
       - name: Delete CloudFormation stack
         if: github.event.inputs.action == 'destroy'
         run: |
+          set -euxo pipefail
           echo "Deleting stack ${{ env.STACK_NAME }}..."
           aws cloudformation delete-stack \
             --stack-name ${{ env.STACK_NAME }} \
@@ -340,6 +349,7 @@ jobs:
       - name: Clean up all change sets and stack
         if: github.event.inputs.action == 'cleanup'
         run: |
+          set -euxo pipefail
           set -euo pipefail
           echo "--- Deleting all change sets for stack ${{ env.STACK_NAME }} ---"
           CHANGESETS=$(aws cloudformation list-change-sets \
