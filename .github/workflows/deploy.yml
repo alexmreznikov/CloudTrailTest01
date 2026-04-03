@@ -101,6 +101,42 @@ jobs:
           echo "--- Caller identity ---"
           aws sts get-caller-identity
 
+          echo "--- Stack status check ---"
+          STACK_STATUS=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --region ${{ vars.AWS_REGION }} \
+            --query 'Stacks[0].StackStatus' \
+            --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+
+          echo "Current stack status: ${STACK_STATUS}"
+
+          # Check for problematic stack states that should block deployment
+          case "${STACK_STATUS}" in
+            UPDATE_ROLLBACK_FAILED|ROLLBACK_FAILED|DELETE_FAILED)
+              echo "::error::Stack is in a failed state: ${STACK_STATUS}"
+              echo "::error::Manual intervention required. Consider running cleanup action or fixing the stack manually."
+              exit 1
+              ;;
+            REVIEW_IN_PROGRESS)
+              echo "Stack is in REVIEW_IN_PROGRESS state (change set not executed yet)."
+              echo "This will be treated as a new deployment."
+              ;;
+            *_IN_PROGRESS)
+              echo "::error::Stack operation is currently in progress: ${STACK_STATUS}"
+              echo "::error::Wait for the current operation to complete before retrying."
+              exit 1
+              ;;
+            DELETE_COMPLETE|DOES_NOT_EXIST)
+              echo "Stack does not exist or is deleted. Will create new stack."
+              ;;
+            CREATE_COMPLETE|UPDATE_COMPLETE|UPDATE_ROLLBACK_COMPLETE)
+              echo "Stack is in a stable state and ready for updates."
+              ;;
+            *)
+              echo "::warning::Unexpected stack status: ${STACK_STATUS}"
+              ;;
+          esac
+
           TRAIL_NAME=$(jq -r '.[] | select(.ParameterKey=="TrailName") | .ParameterValue' "${{ github.workspace }}/${{ env.PARAMS_FILE }}")
           S3_BUCKET=$(jq -r '.[] | select(.ParameterKey=="S3BucketName") | .ParameterValue' "${{ github.workspace }}/${{ env.PARAMS_FILE }}")
 
