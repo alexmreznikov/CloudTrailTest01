@@ -140,7 +140,9 @@ jobs:
 
           echo "Stack status: ${STACK_STATUS}"
 
-          if [[ "${STACK_STATUS}" == "DOES_NOT_EXIST" ]] || [[ "${STACK_STATUS}" == "DELETE_COMPLETE" ]]; then
+          if [[ "${STACK_STATUS}" == "DOES_NOT_EXIST" ]] \
+              || [[ "${STACK_STATUS}" == "DELETE_COMPLETE" ]]
+              || [[ "${STACK_STATUS}" == "REVIEW_IN_PROGRESS" ]]; then
             CHANGE_SET_TYPE="CREATE"
             echo "Stack does not exist or is deleted. Using CREATE change set type."
           else
