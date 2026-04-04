@@ -48,17 +48,16 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      # Display deployment configuration prominently
       - name: 🚀 Deployment Configuration
         run: |
-          echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║           CLOUDTRAIL DEPLOYMENT CONFIGURATION            ║"
-          echo "╠══════════════════════════════════════════════════════════╣"
-          echo "║  Environment: ${{ github.event.inputs.environment }}                                ║"
-          echo "║  Action:      ${{ github.event.inputs.action }}                                     ║"
-          echo "║  Stack:       ${{ env.STACK_NAME }}               ║"
-          echo "║  Region:      ${{ vars.AWS_REGION }}                         ║"
-          echo "╚══════════════════════════════════════════════════════════╝"
+          echo "=========================================================="
+          echo "         CLOUDTRAIL DEPLOYMENT CONFIGURATION"
+          echo "=========================================================="
+          echo "  Environment: ${{ github.event.inputs.environment }}"
+          echo "  Action:      ${{ github.event.inputs.action }}"
+          echo "  Stack:       ${{ env.STACK_NAME }}"
+          echo "  Region:      ${{ vars.AWS_REGION }}"
+          echo "=========================================================="
           
           echo "::notice title=🌍 Environment::${{ github.event.inputs.environment }}"
           echo "::notice title=⚡ Action::${{ github.event.inputs.action }}"
