@@ -50,20 +50,9 @@ jobs:
 
       - name: Determine deployment environment
         run: |
-          set -euxo pipefail
-
-          SELECTED_ENV="${{ github.event.inputs.environment }}"
-          SELECTED_PARAMS_FILE="vars/${SELECTED_ENV}.json"
-
-          if [ ! -f "${{ github.workspace }}/${SELECTED_PARAMS_FILE}" ]; then
-            echo "::error::Parameter file not found for environment '${SELECTED_ENV}': ${SELECTED_PARAMS_FILE}"
-            exit 1
-          fi
-
-          echo "ENV_KEY=${SELECTED_ENV}" >> "$GITHUB_ENV"
-          echo "PARAMS_FILE=${SELECTED_PARAMS_FILE}" >> "$GITHUB_ENV"
-          echo "Resolved environment: ${SELECTED_ENV}"
-          echo "Resolved params file: ${SELECTED_PARAMS_FILE}"
+          ./scripts/determine-environment.sh \
+            "${{ github.event.inputs.environment }}" \
+            "${{ github.workspace }}"
 
       # Configure AWS credentials using OIDC
       - name: Configure AWS Credentials (OIDC Role)
@@ -87,8 +76,9 @@ jobs:
       # -------------------------------------------------------
       - name: Validate CloudFormation template
         run: |
-          aws cloudformation validate-template \
-            --template-body file://${{ github.workspace }}/${{ env.TEMPLATE_FILE }}
+          ./scripts/validate-template.sh \
+            "${{ github.workspace }}" \
+            "${{ env.TEMPLATE_FILE }}"
 
       # -------------------------------------------------------
       # Preflight checks for referenced resources
@@ -96,66 +86,11 @@ jobs:
       - name: Preflight checks (apply/dry-run)
         if: github.event.inputs.action == 'apply' || github.event.inputs.action == 'dry-run'
         run: |
-          set -euxo pipefail
-
-          echo "--- Caller identity ---"
-          aws sts get-caller-identity
-
-          echo "--- Stack status check ---"
-          STACK_STATUS=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ vars.AWS_REGION }} \
-            --query 'Stacks[0].StackStatus' \
-            --output text 2>/dev/null || echo "DOES_NOT_EXIST")
-
-          echo "Current stack status: ${STACK_STATUS}"
-
-          # Check for problematic stack states that should block deployment
-          case "${STACK_STATUS}" in
-            UPDATE_ROLLBACK_FAILED|ROLLBACK_FAILED|DELETE_FAILED)
-              echo "::error::Stack is in a failed state: ${STACK_STATUS}"
-              echo "::error::Manual intervention required. Consider running cleanup action or fixing the stack manually."
-              exit 1
-              ;;
-            REVIEW_IN_PROGRESS)
-              echo "Stack is in REVIEW_IN_PROGRESS state (change set not executed yet)."
-              echo "This will be treated as a new deployment."
-              ;;
-            *_IN_PROGRESS)
-              echo "::error::Stack operation is currently in progress: ${STACK_STATUS}"
-              echo "::error::Wait for the current operation to complete before retrying."
-              exit 1
-              ;;
-            DELETE_COMPLETE|DOES_NOT_EXIST)
-              echo "Stack does not exist or is deleted. Will create new stack."
-              ;;
-            CREATE_COMPLETE|UPDATE_COMPLETE|UPDATE_ROLLBACK_COMPLETE)
-              echo "Stack is in a stable state and ready for updates."
-              ;;
-            *)
-              echo "::warning::Unexpected stack status: ${STACK_STATUS}"
-              ;;
-          esac
-
-          TRAIL_NAME=$(jq -r '.[] | select(.ParameterKey=="TrailName") | .ParameterValue' "${{ github.workspace }}/${{ env.PARAMS_FILE }}")
-          S3_BUCKET=$(jq -r '.[] | select(.ParameterKey=="S3BucketName") | .ParameterValue' "${{ github.workspace }}/${{ env.PARAMS_FILE }}")
-
-          if [ -z "${TRAIL_NAME}" ] || [ "${TRAIL_NAME}" = "null" ]; then
-            echo "::error::TrailName is missing in ${{ env.PARAMS_FILE }}"
-            exit 1
-          fi
-          if [ -z "${S3_BUCKET}" ] || [ "${S3_BUCKET}" = "null" ]; then
-            echo "::error::S3BucketName is missing in ${{ env.PARAMS_FILE }}"
-            exit 1
-          fi
-
-          echo "Checking for existing trail name collisions: ${TRAIL_NAME}"
-          EXISTING_COUNT=$(aws cloudtrail describe-trails \
-            --trail-name-list "${TRAIL_NAME}" \
-            --region ${{ vars.AWS_REGION }} \
-            --query 'length(trailList)' \
-            --output text)
-          echo "Existing trail count for ${TRAIL_NAME}: ${EXISTING_COUNT}"
+          ./scripts/preflight-checks.sh \
+            "${{ env.STACK_NAME }}" \
+            "${{ vars.AWS_REGION }}" \
+            "${{ github.workspace }}" \
+            "${{ env.PARAMS_FILE }}"
 
       # -------------------------------------------------------
       # Dry-run path (preview changes only)
@@ -165,87 +100,24 @@ jobs:
         env:
           CHANGE_SET_NAME: dry-run-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
-          set -euxo pipefail
-          echo "Creating non-executed change set: ${CHANGE_SET_NAME}"
-
-          STACK_STATUS=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ vars.AWS_REGION }} \
-            --query 'Stacks[0].StackStatus' \
-            --output text 2>/dev/null || echo "DOES_NOT_EXIST")
-
-          echo "Stack status: ${STACK_STATUS}"
-
-          if [[ "${STACK_STATUS}" == "DOES_NOT_EXIST" ]] \
-              || [[ "${STACK_STATUS}" == "DELETE_COMPLETE" ]] \
-              || [[ "${STACK_STATUS}" == "REVIEW_IN_PROGRESS" ]]; then
-            CHANGE_SET_TYPE="CREATE"
-            echo "Stack does not exist or is deleted. Using CREATE change set type."
-          else
-            CHANGE_SET_TYPE="UPDATE"
-            echo "Stack exists in active state. Using UPDATE change set type."
-          fi
-
-          aws cloudformation create-change-set \
-            --stack-name ${{ env.STACK_NAME }} \
-            --change-set-name "${CHANGE_SET_NAME}" \
-            --change-set-type "${CHANGE_SET_TYPE}" \
-            --template-body file://${{ github.workspace }}/${{ env.TEMPLATE_FILE }} \
-            --parameters file://${{ github.workspace }}/${{ env.PARAMS_FILE }} \
-            --capabilities CAPABILITY_NAMED_IAM \
-            --region ${{ vars.AWS_REGION }} \
-            --tags \
-              Key=cmdb-technical-service-offering-id,Value=CI000111111 \
-              Key=ManagedBy,Value=CloudFormation \
-              Key=Environment,Value=${{ env.ENV_KEY }} >/dev/null
-
-          echo "Waiting for change set creation to finish..."
-          if ! aws cloudformation wait change-set-create-complete \
-            --stack-name ${{ env.STACK_NAME }} \
-            --change-set-name "${CHANGE_SET_NAME}" \
-            --region ${{ vars.AWS_REGION }}; then
-            STATUS=$(aws cloudformation describe-change-set \
-              --stack-name ${{ env.STACK_NAME }} \
-              --change-set-name "${CHANGE_SET_NAME}" \
-              --region ${{ vars.AWS_REGION }} \
-              --query 'Status' --output text)
-            REASON=$(aws cloudformation describe-change-set \
-              --stack-name ${{ env.STACK_NAME }} \
-              --change-set-name "${CHANGE_SET_NAME}" \
-              --region ${{ vars.AWS_REGION }} \
-              --query 'StatusReason' --output text)
-
-            echo "Change set status: ${STATUS}"
-            echo "Reason: ${REASON}"
-
-            # No-op updates are surfaced as FAILED with a no-changes reason.
-            if echo "${REASON}" | grep -qi "didn't contain changes"; then
-              echo "No infrastructure changes detected."
-              exit 0
-            fi
-
-            echo "::error::Dry-run failed while creating the change set."
-            exit 1
-          fi
-
-          echo "--- Proposed infrastructure changes ---"
-          aws cloudformation describe-change-set \
-            --stack-name ${{ env.STACK_NAME }} \
-            --change-set-name "${CHANGE_SET_NAME}" \
-            --region ${{ vars.AWS_REGION }} \
-            --query 'Changes[*].ResourceChange.[Action,LogicalResourceId,ResourceType,Replacement]' \
-            --output table
+          ./scripts/dry-run.sh \
+            "${{ env.STACK_NAME }}" \
+            "${{ vars.AWS_REGION }}" \
+            "${{ github.workspace }}" \
+            "${{ env.TEMPLATE_FILE }}" \
+            "${{ env.PARAMS_FILE }}" \
+            "${{ env.ENV_KEY }}" \
+            "${CHANGE_SET_NAME}"
 
       - name: Cleanup dry-run change set
         if: github.event.inputs.action == 'dry-run' && always()
         env:
           CHANGE_SET_NAME: dry-run-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
-          set -euxo pipefail
-          aws cloudformation delete-change-set \
-            --stack-name ${{ env.STACK_NAME }} \
-            --change-set-name "${CHANGE_SET_NAME}" \
-            --region ${{ vars.AWS_REGION }} || true
+          ./scripts/cleanup-changeset.sh \
+            "${{ env.STACK_NAME }}" \
+            "${{ vars.AWS_REGION }}" \
+            "${CHANGE_SET_NAME}"
 
       # -------------------------------------------------------
       # Deploy (apply) path
@@ -253,40 +125,27 @@ jobs:
       - name: Deploy CloudFormation stack
         if: github.event.inputs.action == 'apply'
         run: |
-          set -euxo pipefail
-          aws cloudformation deploy \
-            --template-file ${{ github.workspace }}/${{ env.TEMPLATE_FILE }} \
-            --stack-name ${{ env.STACK_NAME }} \
-            --parameter-overrides file://${{ github.workspace }}/${{ env.PARAMS_FILE }} \
-            --capabilities CAPABILITY_NAMED_IAM \
-            --no-fail-on-empty-changeset \
-            --region ${{ vars.AWS_REGION }} \
-            --tags \
-              "cmdb-technical-service-offering-id=CI000111111" \
-              "ManagedBy=CloudFormation" \
-              "Environment=${{ env.ENV_KEY }}"
-          echo "Stack deployed successfully."
+          ./scripts/deploy-stack.sh \
+            "${{ env.STACK_NAME }}" \
+            "${{ vars.AWS_REGION }}" \
+            "${{ github.workspace }}" \
+            "${{ env.TEMPLATE_FILE }}" \
+            "${{ env.PARAMS_FILE }}" \
+            "${{ env.ENV_KEY }}"
 
       - name: Dump CloudFormation stack events on failure
         if: github.event.inputs.action == 'apply' && failure()
         run: |
-          set -euxo pipefail
-          echo "--- Latest CloudFormation stack events ---"
-          aws cloudformation describe-stack-events \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ vars.AWS_REGION }} \
-            --query 'StackEvents[0:25].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
-            --output table || true
+          ./scripts/dump-stack-events.sh \
+            "${{ env.STACK_NAME }}" \
+            "${{ vars.AWS_REGION }}"
 
       - name: Show stack outputs
         if: github.event.inputs.action == 'apply'
         run: |
-          set -euxo pipefail
-          aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --query 'Stacks[0].Outputs' \
-            --output table \
-            --region ${{ vars.AWS_REGION }}
+          ./scripts/show-stack-outputs.sh \
+            "${{ env.STACK_NAME }}" \
+            "${{ vars.AWS_REGION }}"
 
       # -------------------------------------------------------
       # Verify trail was created correctly
@@ -294,81 +153,24 @@ jobs:
       - name: Verify CloudTrail trail exists
         if: github.event.inputs.action == 'apply'
         run: |
-          set -euxo pipefail
-          echo "--- Describing trail ---"
-          TRAIL_JSON=$(aws cloudtrail describe-trails \
-            --trail-name-list org-mgmt-cloudtrail \
-            --region ${{ vars.AWS_REGION }})
-          echo "$TRAIL_JSON" | jq .
-
-          TRAIL_COUNT=$(echo "$TRAIL_JSON" | jq '.trailList | length')
-          if [ "$TRAIL_COUNT" -eq 0 ]; then
-            echo "::error::Trail 'org-mgmt-cloudtrail' was NOT found."
-            exit 1
-          fi
-          echo "✓ Trail exists."
+          ./scripts/verify-trail-exists.sh \
+            "org-mgmt-cloudtrail" \
+            "${{ vars.AWS_REGION }}"
 
       - name: Verify CloudTrail is logging
         if: github.event.inputs.action == 'apply'
         run: |
-          set -euxo pipefail
-          echo "--- Checking trail status ---"
-          STATUS_JSON=$(aws cloudtrail get-trail-status \
-            --name org-mgmt-cloudtrail \
-            --region ${{ vars.AWS_REGION }})
-          echo "$STATUS_JSON" | jq .
-
-          IS_LOGGING=$(echo "$STATUS_JSON" | jq -r '.IsLogging')
-          if [ "$IS_LOGGING" != "true" ]; then
-            echo "::error::Trail 'org-mgmt-cloudtrail' is NOT logging (IsLogging=$IS_LOGGING)."
-            exit 1
-          fi
-          echo "✓ Trail is actively logging."
+          ./scripts/verify-trail-logging.sh \
+            "org-mgmt-cloudtrail" \
+            "${{ vars.AWS_REGION }}"
 
       - name: Verify trail configuration
         if: github.event.inputs.action == 'apply'
         run: |
-          set -euxo pipefail
-          echo "--- Verifying trail configuration ---"
-          TRAIL_JSON=$(aws cloudtrail describe-trails \
-            --trail-name-list org-mgmt-cloudtrail \
-            --region ${{ vars.AWS_REGION }})
-
-          IS_MULTI_REGION=$(echo "$TRAIL_JSON" | jq -r '.trailList[0].IsMultiRegionTrail')
-          INCLUDE_GLOBAL=$(echo "$TRAIL_JSON" | jq -r '.trailList[0].IncludeGlobalServiceEvents')
-          S3_BUCKET=$(echo "$TRAIL_JSON" | jq -r '.trailList[0].S3BucketName')
-          S3_PREFIX=$(echo "$TRAIL_JSON" | jq -r '.trailList[0].S3KeyPrefix')
-          LOG_VALIDATION=$(echo "$TRAIL_JSON" | jq -r '.trailList[0].LogFileValidationEnabled')
-
-          echo "  IsMultiRegionTrail:        $IS_MULTI_REGION"
-          echo "  IncludeGlobalServiceEvents: $INCLUDE_GLOBAL"
-          echo "  S3BucketName:              $S3_BUCKET"
-          echo "  S3KeyPrefix:               $S3_PREFIX"
-          echo "  LogFileValidationEnabled:  $LOG_VALIDATION"
-
-          ERRORS=0
-          if [ "$IS_MULTI_REGION" != "true" ]; then
-            echo "::error::IsMultiRegionTrail is not true"
-            ERRORS=$((ERRORS+1))
-          fi
-          if [ "$INCLUDE_GLOBAL" != "true" ]; then
-            echo "::error::IncludeGlobalServiceEvents is not true"
-            ERRORS=$((ERRORS+1))
-          fi
-          if [ "$S3_BUCKET" != "org-mgmt-cloudtrail-logs-alexorg-remote" ]; then
-            echo "::error::S3BucketName mismatch: $S3_BUCKET"
-            ERRORS=$((ERRORS+1))
-          fi
-          if [ "$LOG_VALIDATION" != "true" ]; then
-            echo "::error::LogFileValidationEnabled is not true"
-            ERRORS=$((ERRORS+1))
-          fi
-
-          if [ "$ERRORS" -gt 0 ]; then
-            echo "::error::Trail configuration verification failed with $ERRORS error(s)."
-            exit 1
-          fi
-          echo "✓ Trail configuration verified successfully."
+          ./scripts/verify-trail-configuration.sh \
+            "org-mgmt-cloudtrail" \
+            "${{ vars.AWS_REGION }}" \
+            "org-mgmt-cloudtrail-logs-alexorg-remote"
 
       # -------------------------------------------------------
       # Destroy path
@@ -376,18 +178,9 @@ jobs:
       - name: Delete CloudFormation stack
         if: github.event.inputs.action == 'destroy'
         run: |
-          set -euxo pipefail
-          echo "Deleting stack ${{ env.STACK_NAME }}..."
-          aws cloudformation delete-stack \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ vars.AWS_REGION }}
-
-          echo "Waiting for stack deletion to complete..."
-          aws cloudformation wait stack-delete-complete \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ vars.AWS_REGION }}
-
-          echo "✓ Stack deleted successfully."
+          ./scripts/delete-stack.sh \
+            "${{ env.STACK_NAME }}" \
+            "${{ vars.AWS_REGION }}"
 
       # -------------------------------------------------------
       # Clean up all change sets and stack
@@ -395,35 +188,7 @@ jobs:
       - name: Clean up all change sets and stack
         if: github.event.inputs.action == 'cleanup'
         run: |
-          set -euxo pipefail
-          set -euo pipefail
-          echo "--- Deleting all change sets for stack ${{ env.STACK_NAME }} ---"
-          CHANGESETS=$(aws cloudformation list-change-sets \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ vars.AWS_REGION }} \
-            --query 'Summaries[].ChangeSetName' --output text || true)
-          if [ -z "$CHANGESETS" ]; then
-            echo "No change sets found."
-          else
-            for cs in $CHANGESETS; do
-              echo "Deleting change set: $cs"
-              aws cloudformation delete-change-set \
-                --stack-name ${{ env.STACK_NAME }} \
-                --change-set-name "$cs" \
-                --region ${{ vars.AWS_REGION }} || true
-            done
-          fi
-          echo "--- Deleting stack ${{ env.STACK_NAME }} (if exists) ---"
-          if aws cloudformation describe-stacks --stack-name ${{ env.STACK_NAME }} --region ${{ vars.AWS_REGION }} >/dev/null 2>&1; then
-            aws cloudformation delete-stack \
-              --stack-name ${{ env.STACK_NAME }} \
-              --region ${{ vars.AWS_REGION }}
-            echo "Waiting for stack deletion to complete..."
-            aws cloudformation wait stack-delete-complete \
-              --stack-name ${{ env.STACK_NAME }} \
-              --region ${{ vars.AWS_REGION }}
-            echo "✓ Stack deleted successfully."
-          else
-            echo "Stack ${{ env.STACK_NAME }} does not exist."
-          fi
+          ./scripts/cleanup-all.sh \
+            "${{ env.STACK_NAME }}" \
+            "${{ vars.AWS_REGION }}"
 
