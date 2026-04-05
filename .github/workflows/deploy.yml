@@ -59,29 +59,16 @@ jobs:
           echo "  Region:      ${{ vars.AWS_REGION }}"
           echo "=========================================================="
           
-          echo "::notice title=🌍 Environment::${{ github.event.inputs.environment }}"
-          echo "::notice title=⚡ Action::${{ github.event.inputs.action }}"
-          
-          echo "## 🎯 Deployment Configuration" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Environment** | \`${{ github.event.inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Action** | \`${{ github.event.inputs.action }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Stack** | \`${{ env.STACK_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Region** | \`${{ vars.AWS_REGION }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
 
-      # Warn about destructive actions
-      - name: ⚠️ Destructive Action Warning
-        if: github.event.inputs.action == 'destroy' || github.event.inputs.action == 'cleanup'
-        run: |
-          echo "::warning title=⚠️ DESTRUCTIVE ACTION::About to ${{ github.event.inputs.action }} CloudTrail resources in ${{ github.event.inputs.environment }} environment!"
-          echo ""
-          echo "⚠️  WARNING: This will ${{ github.event.inputs.action }} infrastructure!"
-          echo "⚠️  Environment: ${{ github.event.inputs.environment }}"
-          echo "⚠️  Stack: ${{ env.STACK_NAME }}"
-          echo ""
+          echo "## 🎯 Deployment Configuration"                                   >> $GITHUB_STEP_SUMMARY
+          echo ""                                                                 >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |"                                            >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|"                                            >> $GITHUB_STEP_SUMMARY
+          echo "| **Environment** | \`${{ github.event.inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Action** | \`${{ github.event.inputs.action }}\` |"           >> $GITHUB_STEP_SUMMARY
+          echo "| **Stack** | \`${{ env.STACK_NAME }}\` |"                        >> $GITHUB_STEP_SUMMARY
+          echo "| **Region** | \`${{ vars.AWS_REGION }}\` |"                      >> $GITHUB_STEP_SUMMARY
+          echo ""                                                                 >> $GITHUB_STEP_SUMMARY
 
       - name: Determine deployment environment
         run: |
@@ -226,4 +213,3 @@ jobs:
           ./scripts/cleanup-all.sh \
             "${{ env.STACK_NAME }}" \
             "${{ vars.AWS_REGION }}"
-
