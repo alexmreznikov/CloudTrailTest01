@@ -1,10 +1,3 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(cp:*)",
-      "Read(//Users/reznikal/Library/CloudStorage/OneDrive-CommonwealthBankofAustralia/Code/**)",
-      "Bash(mkdir -p CloudTrailBucket01)",
-      "Bash(mkdir:*)"
-    ]
-  }
+  
 }
